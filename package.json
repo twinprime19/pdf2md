@@ -1,0 +1,25 @@
+{
+  "name": "pdf-ocr-app",
+  "version": "1.0.0",
+  "description": "Simple PDF OCR application for Vietnamese text extraction",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js & sleep 2 && open http://localhost:8787",
+    "dev": "node --watch server.js",
+    "stop": "./stop.sh",
+    "verify": "node verify-setup.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "express": "^4.19.0",
+    "multer": "^1.4.5-lts.1",
+    "node-tesseract-ocr": "^2.2.1",
+    "pdf2pic": "^2.1.4"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "author": "",
+  "license": "MIT"
+}

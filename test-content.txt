@@ -1,0 +1,11 @@
+Test Document - Tài liệu thử nghiệm
+
+Xin chào! Đây là một tài liệu thử nghiệm để kiểm tra khả năng nhận dạng văn bản tiếng Việt.
+Hệ thống OCR này có thể đọc được các ký tự đặc biệt như: ă, â, đ, ê, ô, ơ, ư.
+Các dấu thanh điệu: á, à, ả, ã, ạ, ắ, ằ, ẳ, ẵ, ặ.
+
+Hello! This is a test document to verify Vietnamese text recognition capabilities.
+Mixed content with numbers: 123, 456, 789 and special characters: @#$%^&*()
+Date: November 10, 2024 | Time: 12:00 PM
+
+Kết thúc tài liệu thử nghiệm. Cảm ơn bạn đã sử dụng!

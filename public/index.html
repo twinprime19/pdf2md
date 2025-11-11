@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF OCR - Vietnamese Text Extractor</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📄 PDF OCR Tool</h1>
+            <p>Extract Vietnamese text from scanned PDF documents</p>
+        </header>
+
+        <main>
+            <div class="upload-section">
+                <form id="uploadForm" enctype="multipart/form-data">
+                    <div class="file-input-wrapper">
+                        <input type="file" id="pdfFile" name="pdf" accept=".pdf" required>
+                        <label for="pdfFile" class="file-input-label">
+                            <span class="file-input-text">Choose PDF file or drag & drop</span>
+                            <span class="file-input-button">Browse</span>
+                        </label>
+                    </div>
+
+                    <div class="file-info" id="fileInfo" style="display: none;">
+                        <span id="fileName"></span>
+                        <span id="fileSize"></span>
+                    </div>
+
+                    <button type="submit" id="processBtn" disabled>
+                        Extract Text
+                    </button>
+                </form>
+            </div>
+
+            <div class="progress-section" id="progressSection" style="display: none;">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <p id="progressText">Processing PDF...</p>
+            </div>
+
+            <div class="result-section" id="resultSection" style="display: none;">
+                <div class="success-message">
+                    <h3>✅ Text Extraction Complete!</h3>
+                    <p>Your text file is ready for download.</p>
+                    <div class="download-info">
+                        <span id="processingTime"></span>
+                        <span id="pageCount"></span>
+                    </div>
+                    <button id="newFileBtn" class="secondary-btn">Process Another File</button>
+                </div>
+            </div>
+
+            <div class="error-section" id="errorSection" style="display: none;">
+                <div class="error-message">
+                    <h3>❌ Processing Failed</h3>
+                    <p id="errorText"></p>
+                    <button id="retryBtn" class="secondary-btn">Try Again</button>
+                </div>
+            </div>
+        </main>
+
+        <footer>
+            <div class="info-grid">
+                <div class="info-item">
+                    <strong>Supported Files:</strong>
+                    <span>PDF only (up to 50MB)</span>
+                </div>
+                <div class="info-item">
+                    <strong>Languages:</strong>
+                    <span>Vietnamese + English</span>
+                </div>
+                <div class="info-item">
+                    <strong>Output:</strong>
+                    <span>Downloadable .txt file</span>
+                </div>
+                <div class="info-item">
+                    <strong>Privacy:</strong>
+                    <span>Files processed locally, not stored</span>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
