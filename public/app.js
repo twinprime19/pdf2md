@@ -43,6 +43,9 @@ function setupEventListeners() {
     newFileBtn.addEventListener('click', resetUI);
     retryBtn.addEventListener('click', resetUI);
 
+    // Copy button
+    document.getElementById('copyBtn').addEventListener('click', copyText);
+
     // Prevent default drag behaviors
     ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
         fileInputLabel.addEventListener(eventName, preventDefaults);
@@ -127,6 +130,14 @@ function formatFileSize(bytes) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
+function copyText() {
+    const textarea = document.getElementById('ocrText');
+    textarea.select();
+    document.execCommand('copy');
+    document.getElementById('copyBtn').textContent = 'Copied!';
+    setTimeout(() => document.getElementById('copyBtn').textContent = 'Copy Text', 2000);
+}
+
 async function handleFormSubmit(e) {
     e.preventDefault();
 
@@ -180,10 +191,14 @@ async function handleFormSubmit(e) {
 
         const processingTimeMs = Date.now() - startTime;
 
+        // Read blob content for textarea display
+        const textContent = blob.type === 'text/plain' ? await blob.text() : null;
+
         hideProgress();
         showSuccess({
             processingTime: processingTimeMs,
-            filename: filename
+            filename: filename,
+            textContent: textContent
         });
 
     } catch (error) {
@@ -231,6 +246,12 @@ function showSuccess(data) {
     processingTime.textContent = `Processing time: ${(data.processingTime / 1000).toFixed(1)}s`;
     pageCount.textContent = `File: ${data.filename}`;
     resultSection.style.display = 'block';
+
+    // Display OCR text in textarea if available
+    if (data.textContent) {
+        document.getElementById('ocrText').value = data.textContent;
+        document.getElementById('textPreview').style.display = 'block';
+    }
 }
 
 function showError(message) {
@@ -242,6 +263,7 @@ function hideAllSections() {
     progressSection.style.display = 'none';
     resultSection.style.display = 'none';
     errorSection.style.display = 'none';
+    document.getElementById('textPreview').style.display = 'none';
 }
 
 function resetUI() {

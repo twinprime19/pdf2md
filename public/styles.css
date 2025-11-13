@@ -308,3 +308,44 @@ footer {
 .error-section {
     animation: fadeIn 0.5s ease;
 }
+
+/* Text preview section */
+#textPreview {
+    margin: 20px 0;
+    padding: 20px;
+    border: 1px solid #ddd;
+    border-radius: 12px;
+    background: #f8f9fa;
+    animation: fadeIn 0.5s ease;
+}
+
+#ocrText {
+    width: 100%;
+    margin-bottom: 15px;
+    padding: 15px;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+    font-size: 0.9rem;
+    line-height: 1.5;
+    resize: vertical;
+    min-height: 200px;
+    background: white;
+}
+
+#copyBtn {
+    width: auto;
+    padding: 10px 20px;
+    background: #28a745;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.3s ease;
+}
+
+#copyBtn:hover {
+    background: #218838;
+    transform: translateY(-2px);
+}
