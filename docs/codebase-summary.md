@@ -1,12 +1,13 @@
 # Codebase Summary
 
 ## Overview
-PDF OCR application built with Node.js that extracts Vietnamese text from scanned PDF documents using Tesseract OCR and system poppler utilities.
+PDF OCR Application is a Node.js-based web application designed for extracting Vietnamese text from scanned PDF documents using Tesseract OCR. The application provides a simple web interface for uploading PDF files and downloading extracted text as .txt files with comprehensive Vietnamese language support.
 
 ## Architecture
-**Type**: Stateless web application with frontend/backend separation
-**Processing Model**: Synchronous request-response with temporary file cleanup
-**Port**: 3847 (random port to avoid conflicts)
+**Type**: Stateless three-layer web application with frontend/backend separation
+**Processing Model**: Synchronous request-response with temporary file cleanup and session isolation
+**Port**: 3847 (configured to avoid default port conflicts on development machines)
+**Pattern**: ES6 modules with async/await throughout the codebase
 
 ## Core Components
 
@@ -23,10 +24,19 @@ PDF OCR application built with Node.js that extracts Vietnamese text from scanne
 - Health check endpoint at `/health`
 
 ### OCR Processing (`/ocr-processor.js`)
-- PDF to images conversion using system `pdftoppm` (poppler)
-- Multi-language OCR with Tesseract (Vietnamese + English)
-- Page-by-page text extraction with fallback mechanisms
-- Text file generation with metadata headers
+**Core OCR Backend Libraries:**
+- **node-tesseract-ocr (^2.2.1)**: Node.js wrapper for Tesseract OCR engine
+- **Tesseract OCR Engine**: System-level OCR with LSTM neural networks (OEM 1)
+- **Poppler pdftoppm**: System command for PDF to image conversion at 300 DPI
+- **pdf2pic (^2.1.4)**: Declared dependency but unused (replaced by direct poppler usage)
+
+**OCR Processing Pipeline:**
+1. `pdfToImages()`: Converts PDF pages to JPEG using `pdftoppm -jpeg -r 300`
+2. `extractTextFromImage()`: Performs OCR with Vietnamese+English (`vie+eng`) configuration
+3. `processPDF()`: Orchestrates complete workflow with session-based temporary directories
+4. Vietnamese language support with English fallback mechanism
+5. Page segmentation mode 3 (fully automatic) for optimal text detection
+6. Text assembly with page separators and metadata headers
 
 ### Utility Scripts
 - **verify-setup.js**: System dependency verification (Node.js, Tesseract, poppler)
@@ -40,11 +50,17 @@ PDF OCR application built with Node.js that extracts Vietnamese text from scanne
 - Tesseract OCR with Vietnamese language pack (`vie`)
 - poppler-utils (`pdftoppm`, `pdftocairo`)
 
-### NPM Dependencies
-- **express**: Web server framework
-- **multer**: File upload middleware
-- **node-tesseract-ocr**: Tesseract OCR wrapper
-- **pdf2pic**: PDF processing library (unused after system poppler implementation)
+### NPM Dependencies (Production)
+- **express (^4.19.0)**: Web server framework providing HTTP routing and middleware
+- **multer (^1.4.5-lts.1)**: Multipart/form-data parsing for file uploads with validation
+- **node-tesseract-ocr (^2.2.1)**: Node.js wrapper for Tesseract OCR engine with promise support
+- **pdf2pic (^2.1.4)**: PDF processing library (declared but not actively used)
+- **dotenv (^17.2.3)**: Environment variable management and configuration
+
+### System Dependencies (Critical)
+- **Tesseract OCR with Vietnamese language pack (`vie`)**: Core text recognition engine
+- **Poppler Utils (`pdftoppm`, `pdftocairo`)**: PDF manipulation and image conversion tools
+- **Node.js (>=18)**: JavaScript runtime with ES6 module support
 
 ## Data Flow
 
@@ -59,10 +75,26 @@ PDF OCR application built with Node.js that extracts Vietnamese text from scanne
 
 ## Key Features
 
-### Language Support
-- Primary: Vietnamese (`vie`)
-- Secondary: English (`eng`)
-- Fallback mechanism if Vietnamese OCR fails
+### Vietnamese Language Support Implementation
+**OCR Configuration:**
+- **Primary Language**: Vietnamese (`vie`) using Tesseract trained data
+- **Secondary Language**: English (`eng`) for mixed content documents
+- **Combined Mode**: `vie+eng` for optimal recognition of mixed Vietnamese-English text
+- **Fallback Mechanism**: Automatic English-only processing if Vietnamese OCR fails
+
+**Technical Implementation:**
+```javascript
+const config = {
+  lang: 'vie+eng',    // Vietnamese + English dual language
+  oem: 1,             // LSTM OCR Engine Mode (neural network)
+  psm: 3,             // Fully automatic page segmentation
+};
+```
+
+**Vietnamese Character Support:**
+- Diacritical marks: á, à, ả, ã, ạ, ắ, ằ, ẳ, ẵ, ặ
+- Special characters: ă, â, đ, ê, ô, ơ, ư
+- Tone marks and combined characters properly recognized
 
 ### File Processing
 - Stateless operation (no persistent storage)

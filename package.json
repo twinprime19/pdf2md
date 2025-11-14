@@ -5,7 +5,7 @@
   "main": "server.js",
   "type": "module",
   "scripts": {
-    "start": "node server.js & sleep 2 && open http://localhost:8787",
+    "start": "(lsof -ti:3847 | xargs kill -9 2>/dev/null || true) && node server.js & sleep 2 && open http://localhost:3847",
     "dev": "node --watch server.js",
     "stop": "./stop.sh",
     "verify": "node verify-setup.js"
