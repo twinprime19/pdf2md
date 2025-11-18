@@ -6,17 +6,22 @@ Professional Vietnamese text extraction tool for scanned PDF documents using Tes
 
 ### Core Functionality
 - **Vietnamese + English OCR**: Dual-language recognition with automatic fallback
-- **Large File Support**: Handle PDFs up to 50MB with efficient processing
-- **Drag & Drop Interface**: Modern web interface with progress tracking
-- **Stateless Processing**: No persistent storage, automatic cleanup
+- **Large File Support**: Handle PDFs up to 50MB with streaming architecture
+- **Streaming Processing**: Memory-efficient processing for 300+ page documents
+- **Drag & Drop Interface**: Modern web interface with real-time progress tracking
+- **Intelligent Routing**: Auto-selects legacy or streaming processor based on file size
+- **Checkpoint Recovery**: Resume processing from interruption points
 - **High-Quality Conversion**: 300 DPI image processing for optimal OCR accuracy
 - **Formatted Output**: Downloadable .txt files with metadata and page separators
 
 ### Advanced Features
+- **Streaming Architecture**: Process large files with <1GB memory usage
+- **Feature Flag System**: Gradual rollout with ENABLE_STREAMING configuration
 - **Fallback Mechanisms**: English-only processing if Vietnamese OCR fails
-- **Session Isolation**: Concurrent file processing without conflicts
-- **Real-time Progress**: Visual feedback during processing
-- **Error Recovery**: Comprehensive error handling with user-friendly messages
+- **Session Management**: Concurrent file processing with checkpoint isolation
+- **Real-time Progress**: Visual feedback with session status tracking
+- **Error Recovery**: Comprehensive error handling with automatic retry logic
+- **Memory Management**: Automatic garbage collection and resource optimization
 - **System Verification**: Built-in dependency checking and setup validation
 
 ## Quick Start
@@ -97,11 +102,32 @@ PDF Upload → Image Conversion → Text Extraction → File Generation → Down
 
 ## Configuration
 
+### Environment Variables
+```bash
+# Core Server Settings
+PORT=3847                          # Application port
+
+# Streaming Feature Control
+ENABLE_STREAMING=false             # Enable streaming processor (Phase 1)
+STREAMING_THRESHOLD_MB=10          # File size threshold for streaming mode
+
+# Memory & Performance
+MAX_MEMORY_MB=1024                 # Maximum memory per session
+CHECKPOINT_INTERVAL=10             # Pages processed before checkpoint save
+ENABLE_GC=false                    # Enable garbage collection (dev only)
+
+# Maintenance & Cleanup
+CHECKPOINT_RETENTION_DAYS=7        # Checkpoint file retention period
+LOG_LEVEL=info                     # Logging verbosity: debug|info|warn|error
+```
+
 ### Server Settings
 - **Port**: 3847 (configured to avoid conflicts)
 - **Max File Size**: 50MB per upload
-- **Processing**: Synchronous with automatic cleanup
-- **Temporary Storage**: Session-based isolation
+- **Processing Mode**: Intelligent routing (Legacy <10MB, Streaming ≥10MB)
+- **Memory Limit**: <1GB per session with automatic management
+- **Checkpoint System**: Recovery support with configurable intervals
+- **Session Management**: Isolated temporary storage with automatic cleanup
 
 ### OCR Settings
 - **Image Quality**: 300 DPI for optimal accuracy
@@ -116,6 +142,9 @@ npm start           # Start server (opens browser automatically)
 npm run dev         # Development mode with file watching
 npm run stop        # Stop server and cleanup processes
 npm run verify      # Verify system dependencies
+npm test            # Run comprehensive test suite
+npm run test:memory # Memory usage validation tests
+npm run test:phase1 # Phase 1 streaming implementation tests
 ./stop.sh           # Alternative stop script with cleanup
 ```
 
@@ -127,20 +156,31 @@ npm run verify      # Verify system dependencies
 │   ├── app.js             # Client-side JavaScript
 │   └── styles.css         # Modern responsive CSS
 ├── docs/                  # Comprehensive documentation
-├── ocr-processor.js       # Core OCR processing logic
-├── server.js              # Express server and API
+├── ocr-processor.js       # Legacy OCR processing logic
+├── streaming-processor.js # Streaming processor for large files
+├── checkpoint-manager.js  # Checkpoint persistence and recovery
+├── server.js              # Express server with intelligent routing
 ├── verify-setup.js        # System dependency validation
 ├── package.json           # Node.js configuration
-└── temp/                  # Temporary file storage (auto-created)
+├── .env                   # Environment configuration
+├── temp/                  # Temporary file storage (auto-created)
+└── checkpoints/           # Checkpoint storage (auto-created)
 ```
 
 ## Performance & Limits
 
 ### Processing Performance
+
+#### Legacy Mode (Files <10MB)
 - **Small PDFs** (1-5 pages): 2-10 seconds
 - **Medium PDFs** (6-20 pages): 15-45 seconds
-- **Large PDFs** (21+ pages): 1-3 minutes
 - **Memory Usage**: ~200-500MB during processing
+
+#### Streaming Mode (Files ≥10MB)
+- **Large PDFs** (21-100 pages): Linear time scaling, ~30-45s per 10 pages
+- **Extra Large PDFs** (100-300+ pages): Consistent performance, checkpoint recovery
+- **Memory Usage**: <1GB consistently, regardless of file size
+- **Resumable**: Continue from last checkpoint on interruption
 
 ### File Constraints
 - **Maximum Size**: 50MB upload limit

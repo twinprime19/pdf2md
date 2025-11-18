@@ -108,7 +108,26 @@ const config = {
 - Temporary file isolation
 - Process cleanup on server shutdown
 
-## Configuration
+## Environment Configuration
+
+### Core Settings (.env)
+```bash
+# Server Configuration
+PORT=3847                          # Application port
+
+# Streaming Feature Control
+ENABLE_STREAMING=false             # Feature flag for Phase 1 rollout
+STREAMING_THRESHOLD_MB=10          # File size threshold for streaming
+
+# Memory & Performance
+MAX_MEMORY_MB=1024                 # Memory limit per session
+CHECKPOINT_INTERVAL=10             # Pages between checkpoint saves
+ENABLE_GC=false                    # Garbage collection (dev mode)
+
+# Maintenance
+CHECKPOINT_RETENTION_DAYS=7        # Checkpoint cleanup period
+LOG_LEVEL=info                     # Logging verbosity
+```
 
 ### Port Management
 - Fixed port 3847 to avoid default port conflicts
@@ -134,6 +153,9 @@ Run `npm run verify` to check:
 - Start: `npm start`
 - Stop: `npm run stop` or `./stop.sh`
 - Verification: `npm run verify`
+- Testing: `npm test` (comprehensive Phase 1 validation)
+- Memory Testing: `npm run test:memory`
+- Phase 1 Validation: `npm run test:phase1`
 
 ### Troubleshooting
 - System dependencies must be installed via package manager (brew on macOS)

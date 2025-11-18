@@ -8,18 +8,31 @@
     "start": "(lsof -ti:3847 | xargs kill -9 2>/dev/null || true) && node server.js & sleep 2 && open http://localhost:3847",
     "dev": "node --watch server.js",
     "stop": "./stop.sh",
-    "verify": "node verify-setup.js"
+    "verify": "node verify-setup.js",
+    "test": "NODE_OPTIONS='--experimental-vm-modules' jest",
+    "test:watch": "NODE_OPTIONS='--experimental-vm-modules' jest --watch",
+    "test:coverage": "NODE_OPTIONS='--experimental-vm-modules' jest --coverage",
+    "test:streaming": "NODE_OPTIONS='--experimental-vm-modules' jest --testNamePattern='streaming'",
+    "test:memory": "node --expose-gc tests/run-memory-tests.js",
+    "test:integration": "NODE_OPTIONS='--experimental-vm-modules' jest --testNamePattern='integration'",
+    "test:phase1": "node tests/phase1-validation.js"
   },
   "dependencies": {
     "dotenv": "^17.2.3",
     "express": "^4.19.0",
     "multer": "^1.4.5-lts.1",
     "node-tesseract-ocr": "^2.2.1",
-    "pdf2pic": "^2.1.4"
+    "pdf2pic": "^2.1.4",
+    "uuid": "^13.0.0"
   },
   "engines": {
     "node": ">=18"
   },
   "author": "",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@jest/globals": "^30.2.0",
+    "jest": "^30.2.0",
+    "supertest": "^7.1.4"
+  }
 }

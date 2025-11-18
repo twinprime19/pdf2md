@@ -7,14 +7,25 @@
 **Communication**: HTTP REST API with file upload/download
 
 ```
-┌─────────────────┐    HTTP/REST    ┌─────────────────┐    System Calls    ┌─────────────────┐
-│   Web Browser   │◄─────────────── │   Express.js    │◄─────────────────── │  OCR Pipeline   │
-│   (Frontend)    │                 │   (Backend)     │                     │  (Processing)   │
-└─────────────────┘                 └─────────────────┘                     └─────────────────┘
+┌─────────────────┐    HTTP/REST    ┌─────────────────┐    Intelligent    ┌─────────────────┐
+│   Web Browser   │◄─────────────── │   Express.js    │◄───── Routing ────│  Processing     │
+│   (Frontend)    │                 │   (Backend)     │                   │  Layer          │
+└─────────────────┘                 └─────────────────┘                   └─────────────────┘
          │                                   │                                       │
-         │                                   │                                       │
-    Static Files                      Temporary Storage                    System Dependencies
-     (HTML/CSS/JS)                       (temp/)                          (Tesseract/Poppler)
+         │                                   │                          ┌─────────────────────┐
+    Static Files                      Feature Flags                     │ Legacy Processor    │
+     (HTML/CSS/JS)                 (ENABLE_STREAMING)                   │ (<10MB files)      │
+                                                                         │ - Memory: ~500MB    │
+                                                                         │ - Promise.all()     │
+                                                                         └─────────────────────┘
+                                                                                     │
+                                                                         ┌─────────────────────┐
+                                                                         │ Streaming Processor │
+                                                                         │ (≥10MB files)      │
+                                                                         │ - Memory: <1GB      │
+                                                                         │ - Page-by-page      │
+                                                                         │ - Checkpoint system │
+                                                                         └─────────────────────┘
 ```
 
 ## Component Architecture
@@ -60,11 +71,18 @@ Express.js Application
 #### API Endpoints
 - **`GET /`**: Serve static frontend application
 - **`GET /health`**: System health check
-- **`POST /api/ocr`**: PDF processing endpoint
+- **`POST /api/ocr`**: PDF processing endpoint (legacy)
   - File upload via multipart/form-data
   - Validation (type, size)
-  - OCR processing invocation
-  - File download response
+  - Legacy OCR processing
+  - File download response (blob)
+- **`POST /api/ocr/streaming`**: Streaming PDF processing endpoint
+  - File upload and session management
+  - Streaming OCR with checkpoint support
+  - JSON response with session ID
+- **`GET /api/session/:sessionId/status`**: Session progress tracking
+- **`GET /api/download/:sessionId`**: Download completed results
+- **`GET /api/sessions`**: List active processing sessions
 
 #### Middleware Stack
 ```javascript
@@ -73,7 +91,21 @@ app.use('/api/ocr', upload.single())  // File upload
 app.use(errorHandler)                 // Error handling
 ```
 
-### Processing Layer (`/ocr-processor.js`)
+### Processing Layer
+
+#### Intelligent Routing (`/server.js`)
+```javascript
+// Feature flag controlled routing
+if (fileSize >= streamingThreshold && streamingEnabled) {
+  // Route to streaming processor
+  return await streamingProcessor.processStreamingPDF();
+} else {
+  // Route to legacy processor
+  return await legacyProcessor.processPDF();
+}
+```
+
+#### Legacy Processor (`/ocr-processor.js`)
 
 #### PDF Processing Pipeline
 ```
@@ -100,15 +132,46 @@ extractTextFromImage(imagePath)
 └── Return cleaned text
 ```
 
-**PDF Processor**
+**PDF Processor (Legacy)**
 ```javascript
 processPDF(pdfPath, tempDir)
 ├── Create session-specific image directory
 ├── Convert PDF to images
-├── Parallel OCR processing of all images
+├── Parallel OCR processing of all images (Promise.all)
 ├── Text assembly with page separators
 ├── Cleanup temporary images
 └── Return combined text with metadata
+```
+
+#### Streaming Processor (`/streaming-processor.js`)
+
+**Streaming PDF Processor**
+```javascript
+processStreamingPDF(pdfPath, sessionId, progressCallback)
+├── Load checkpoint (resume from interruption)
+├── Initialize/append to output text file
+├── Page-by-page processing loop:
+│   ├── Extract single page to image
+│   ├── OCR single page with fallback
+│   ├── Append text to output file
+│   ├── Save checkpoint every N pages
+│   ├── Memory cleanup (GC)
+│   └── Progress callback update
+├── Mark session as complete
+└── Return output file path
+```
+
+#### Checkpoint Manager (`/checkpoint-manager.js`)
+
+**Checkpoint Management**
+```javascript
+CheckpointManager
+├── save(sessionId, data): Atomic checkpoint persistence
+├── load(sessionId): Resume from checkpoint
+├── exists(sessionId): Check checkpoint availability
+├── delete(sessionId): Cleanup checkpoint files
+├── list(): List all active sessions
+└── cleanup(): Remove expired checkpoints
 ```
 
 ## Data Flow Architecture
@@ -128,14 +191,16 @@ processPDF(pdfPath, tempDir)
 ```
 
 ### Processing Flow
+
+#### Legacy Mode (<10MB files)
 ```
 PDF File (temp/input.pdf)
     ↓
-PDF-to-Images Conversion (pdftoppm)
+PDF-to-Images Conversion (pdftoppm - all pages)
     ↓
 Image Files (temp/images_[session]/page-*.jpg)
     ↓
-Parallel OCR Processing (Tesseract)
+Parallel OCR Processing (Promise.all - all pages)
     ↓
 Text Array (one per page)
     ↓
@@ -143,7 +208,28 @@ Text Assembly (page separators + metadata)
     ↓
 Output File (temp/[filename]_ocr_[timestamp].txt)
     ↓
-Download Response + Cleanup
+Blob Download Response + Cleanup
+```
+
+#### Streaming Mode (≥10MB files)
+```
+PDF File (temp/input.pdf)
+    ↓
+Session Creation + Checkpoint Check
+    ↓
+Page-by-Page Processing Loop:
+│   ├── Extract Single Page (pdftoppm -f N -l N)
+│   ├── OCR Single Page (Tesseract)
+│   ├── Append to Output File (streaming write)
+│   ├── Save Checkpoint (every N pages)
+│   ├── Memory Cleanup (GC)
+│   └── Progress Update
+    ↓
+Session Completion + Final Checkpoint
+    ↓
+JSON Response with Download URL
+    ↓
+Client Downloads via /api/download/:sessionId
 ```
 
 ### Error Handling Flow
@@ -161,15 +247,33 @@ Client Displays User-Friendly Message
 
 ## Storage Architecture
 
-### Temporary File Management
+### File Management Architecture
+
+#### Temporary Storage
 ```
 temp/
 ├── [uploaded-file-id].pdf          # Original uploaded file
 ├── images_[session-id]/             # Session-specific image directory
-│   ├── page-01.jpg                  # Converted PDF pages
-│   ├── page-02.jpg
+│   ├── page-01.jpg                  # Converted PDF pages (legacy)
+│   ├── page-02.jpg                  # OR single page (streaming)
 │   └── ...
-└── [filename]_ocr_[timestamp].txt   # Generated output file
+├── sessions/                        # Streaming session outputs
+│   ├── [session-id].txt            # Streaming output file
+│   └── ...
+└── [filename]_ocr_[timestamp].txt   # Legacy output file
+```
+
+#### Checkpoint Storage
+```
+checkpoints/
+├── [session-id].json               # Checkpoint data
+│   ├── lastPage: number            # Resume point
+│   ├── totalPages: number          # Total pages
+│   ├── complete: boolean           # Processing status
+│   ├── timestamp: number           # Last update time
+│   ├── processingTimes: array      # Performance tracking
+│   └── errorCount: number          # Error tracking
+└── ...
 ```
 
 #### Lifecycle Management
@@ -179,10 +283,20 @@ temp/
 - **Session Isolation**: Unique directories prevent file conflicts
 
 ### Memory Management
-- **Streaming**: Large files processed page-by-page
-- **Cleanup**: Immediate file deletion after use
-- **Limits**: 50MB upload limit prevents memory exhaustion
-- **Concurrent Processing**: Multiple requests handled independently
+
+#### Legacy Mode (Small Files)
+- **Memory Pattern**: Peak usage during Promise.all processing
+- **Usage**: ~200-500MB for typical files
+- **Limit**: Practical limit ~30 pages (memory crashes beyond)
+- **Cleanup**: Immediate file deletion after processing
+
+#### Streaming Mode (Large Files)
+- **Memory Pattern**: Consistent <1GB usage regardless of file size
+- **Page Processing**: One page at a time with immediate cleanup
+- **Garbage Collection**: Explicit GC calls when enabled
+- **Checkpoint Recovery**: Resume processing without memory penalty
+- **Session Isolation**: Independent memory spaces per session
+- **Resource Limits**: Configurable MAX_MEMORY_MB per session
 
 ## System Integration Architecture
 
@@ -283,9 +397,13 @@ Local Machine
 ```
 Environment Variables:
 ├── PORT: Server port (default 3847)
-├── TEMP_DIR: Temporary directory path
-├── MAX_FILE_SIZE: Upload size limit
-└── OCR_LANGUAGES: Tesseract language configuration
+├── ENABLE_STREAMING: Feature flag for streaming mode (default: false)
+├── STREAMING_THRESHOLD_MB: File size threshold for streaming (default: 10MB)
+├── MAX_MEMORY_MB: Memory limit per session (default: 1024MB)
+├── CHECKPOINT_INTERVAL: Pages between checkpoints (default: 10)
+├── CHECKPOINT_RETENTION_DAYS: Checkpoint cleanup period (default: 7)
+├── ENABLE_GC: Enable garbage collection (default: false)
+└── LOG_LEVEL: Logging verbosity (default: info)
 ```
 
 ## Monitoring and Observability
