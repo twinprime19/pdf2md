@@ -43,8 +43,11 @@ function setupEventListeners() {
     newFileBtn.addEventListener('click', resetUI);
     retryBtn.addEventListener('click', resetUI);
 
-    // Copy button
-    document.getElementById('copyBtn').addEventListener('click', copyText);
+    // Copy and download buttons
+    document.getElementById('copyOriginal').addEventListener('click', () => copyText('originalText'));
+    document.getElementById('copyCleaned').addEventListener('click', () => copyText('cleanedText'));
+    document.getElementById('downloadOriginal').addEventListener('click', downloadOriginal);
+    document.getElementById('downloadDiff').addEventListener('click', downloadDiff);
 
     // Prevent default drag behaviors
     ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
@@ -130,12 +133,17 @@ function formatFileSize(bytes) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-function copyText() {
-    const textarea = document.getElementById('ocrText');
+function copyText(textareaId) {
+    const textarea = document.getElementById(textareaId);
     textarea.select();
     document.execCommand('copy');
-    document.getElementById('copyBtn').textContent = 'Copied!';
-    setTimeout(() => document.getElementById('copyBtn').textContent = 'Copy Text', 2000);
+
+    // Update button text temporarily
+    const buttonId = textareaId === 'originalText' ? 'copyOriginal' : 'copyCleaned';
+    const button = document.getElementById(buttonId);
+    const originalText = button.textContent;
+    button.textContent = 'Copied!';
+    setTimeout(() => button.textContent = originalText, 2000);
 }
 
 async function handleFormSubmit(e) {
@@ -166,54 +174,37 @@ async function handleFormSubmit(e) {
             throw new Error(errorData.error || 'Processing failed');
         }
 
-        // CRITICAL FIX: Detect response type (JSON vs blob)
+        // Get JSON response with original and cleaned text
         const contentType = response.headers.get('content-type');
 
         if (contentType && contentType.includes('application/json')) {
-            // Streaming mode - handle session response
-            const sessionData = await response.json();
+            const data = await response.json();
 
-            if (sessionData.sessionId && sessionData.streaming) {
+            // Check if this is streaming mode response
+            if (data.sessionId && data.streaming) {
                 hideProgress();
-                showStreamingMessage(sessionData, startTime);
+                showStreamingMessage(data, startTime);
                 return;
             }
+
+            // Legacy mode - handle dual-text response
+            hideProgress();
+            showSuccess(data);
+
+            // Setup synchronized scrolling after textareas are populated
+            setupSynchronizedScrolling();
+        } else {
+            // Fallback for old blob response format (should not happen with current code)
+            const blob = await response.blob();
+            const textContent = await blob.text();
+            hideProgress();
+            showSuccess({
+                original: textContent,
+                cleaned: textContent,
+                metadata: { documentType: 'unknown', changesCount: 0, confidence: 0 },
+                filename: selectedFile.name
+            });
         }
-
-        // Legacy mode - handle blob download
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.style.display = 'none';
-        a.href = url;
-
-        // Get filename from response headers or generate one
-        const contentDisposition = response.headers.get('content-disposition');
-        let filename = 'ocr_result.txt';
-        if (contentDisposition) {
-            const filenameMatch = contentDisposition.match(/filename[^;=\\n]*=((['\\\"]).?|[^;\\n]*)/);
-            if (filenameMatch && filenameMatch[1]) {
-                filename = filenameMatch[1].replace(/['\\\"]/g, '');
-            }
-        }
-        a.download = filename;
-
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        window.URL.revokeObjectURL(url);
-
-        const processingTimeMs = Date.now() - startTime;
-
-        // Read blob content for textarea display
-        const textContent = blob.type === 'text/plain' ? await blob.text() : null;
-
-        hideProgress();
-        showSuccess({
-            processingTime: processingTimeMs,
-            filename: filename,
-            textContent: textContent
-        });
 
     } catch (error) {
         console.error('OCR processing error:', error);
@@ -258,13 +249,21 @@ function hideProgress() {
 
 function showSuccess(data) {
     processingTime.textContent = `Processing time: ${(data.processingTime / 1000).toFixed(1)}s`;
-    pageCount.textContent = `File: ${data.filename}`;
+    pageCount.textContent = `File: ${data.filename} (${data.pages} pages)`;
     resultSection.style.display = 'block';
 
-    // Display OCR text in textarea if available
-    if (data.textContent) {
-        document.getElementById('ocrText').value = data.textContent;
+    // Display both original and cleaned text in textareas
+    if (data.original && data.cleaned) {
+        document.getElementById('originalText').value = data.original;
+        document.getElementById('cleanedText').value = data.cleaned;
         document.getElementById('textPreview').style.display = 'block';
+
+        // Update metadata display
+        document.getElementById('docType').textContent = formatDocumentType(data.metadata.documentType);
+        document.getElementById('corrections').textContent = data.metadata.changesCount || 0;
+        document.getElementById('confidence').textContent = Math.round((data.metadata.confidence || 0) * 100);
+        document.getElementById('ocrTime').textContent = data.ocrTime || 0;
+        document.getElementById('cleanTime').textContent = data.cleaningTime || 0;
     }
 }
 
@@ -497,4 +496,157 @@ function showStreamingSuccess(status, startTime) {
             </div>
         `;
     }
+}
+
+// ============================================
+// DUAL-TEXT COMPARISON FEATURES
+// ============================================
+
+/**
+ * Setup synchronized scrolling between original and cleaned textareas
+ */
+function setupSynchronizedScrolling() {
+    const originalTA = document.getElementById('originalText');
+    const cleanedTA = document.getElementById('cleanedText');
+
+    if (!originalTA || !cleanedTA) return;
+
+    let isSyncing = false;
+
+    // Sync from original to cleaned
+    originalTA.addEventListener('scroll', () => {
+        if (!isSyncing) {
+            isSyncing = true;
+            cleanedTA.scrollTop = originalTA.scrollTop;
+            cleanedTA.scrollLeft = originalTA.scrollLeft;
+            setTimeout(() => isSyncing = false, 50);
+        }
+    });
+
+    // Sync from cleaned to original
+    cleanedTA.addEventListener('scroll', () => {
+        if (!isSyncing) {
+            isSyncing = true;
+            originalTA.scrollTop = cleanedTA.scrollTop;
+            originalTA.scrollLeft = cleanedTA.scrollLeft;
+            setTimeout(() => isSyncing = false, 50);
+        }
+    });
+
+    console.log('Synchronized scrolling enabled');
+}
+
+/**
+ * Download original OCR text as .txt file
+ */
+function downloadOriginal() {
+    const text = document.getElementById('originalText').value;
+    const filename = selectedFile ? selectedFile.name.replace('.pdf', '_original.txt') : 'original_ocr.txt';
+
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    downloadBlob(blob, filename);
+}
+
+/**
+ * Generate and download diff report comparing original and cleaned text
+ */
+function downloadDiff() {
+    const original = document.getElementById('originalText').value;
+    const cleaned = document.getElementById('cleanedText').value;
+
+    // Get metadata
+    const docType = document.getElementById('docType').textContent;
+    const corrections = document.getElementById('corrections').textContent;
+    const confidence = document.getElementById('confidence').textContent;
+    const ocrTime = document.getElementById('ocrTime').textContent;
+    const cleanTime = document.getElementById('cleanTime').textContent;
+
+    // Generate diff report
+    const report = generateDiffReport(original, cleaned, {
+        docType,
+        corrections,
+        confidence,
+        ocrTime,
+        cleanTime
+    });
+
+    const filename = selectedFile ? selectedFile.name.replace('.pdf', '_diff_report.txt') : 'ocr_diff_report.txt';
+    const blob = new Blob([report], { type: 'text/plain;charset=utf-8' });
+    downloadBlob(blob, filename);
+}
+
+/**
+ * Generate a text-based diff report
+ */
+function generateDiffReport(original, cleaned, metadata) {
+    const header = `
+========================================
+OCR CLEANING DIFF REPORT
+========================================
+
+Generated: ${new Date().toLocaleString()}
+Document Type: ${metadata.docType}
+Corrections Made: ${metadata.corrections}
+Confidence Score: ${metadata.confidence}%
+OCR Processing Time: ${metadata.ocrTime}ms
+Cleaning Time: ${metadata.cleanTime}ms
+
+========================================
+STATISTICS
+========================================
+
+Original Length: ${original.length} characters
+Cleaned Length: ${cleaned.length} characters
+Difference: ${cleaned.length - original.length} characters
+
+========================================
+ORIGINAL TEXT
+========================================
+
+${original}
+
+========================================
+CLEANED TEXT
+========================================
+
+${cleaned}
+
+========================================
+END OF REPORT
+========================================
+`;
+
+    return header;
+}
+
+/**
+ * Helper function to download blob as file
+ */
+function downloadBlob(blob, filename) {
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.style.display = 'none';
+    a.href = url;
+    a.download = filename;
+
+    document.body.appendChild(a);
+    a.click();
+
+    // Cleanup
+    setTimeout(() => {
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+    }, 100);
+}
+
+/**
+ * Format document type for display
+ */
+function formatDocumentType(type) {
+    if (!type || type === 'unknown') return 'Unknown';
+
+    // Convert snake_case to Title Case
+    return type.split('_')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ');
 }

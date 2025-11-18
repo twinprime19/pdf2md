@@ -115,33 +115,42 @@ app.post('/api/ocr', upload.single('pdf'), async (req, res) => {
       // Use original processing for small files
       const result = await processPDF(tempPath, 'temp');
 
-      if (!result.text || result.text.trim().length === 0) {
+      if (!result.original || result.original.trim().length === 0) {
         return res.status(400).json({
           error: 'No text found in PDF. Make sure the PDF contains readable text or images with text.'
         });
       }
 
-      // Generate text file for download
-      const textFilePath = await generateTextFile(result.text, originalname, 'temp');
-      tempFilesToCleanup.push(textFilePath);
-
-      // Send the text file (original behavior)
-      res.download(textFilePath, path.basename(textFilePath), (err) => {
-        if (err) {
-          console.error('Download error:', err);
-        }
-
-        // Cleanup temp files after download
-        setTimeout(async () => {
-          for (const filePath of tempFilesToCleanup) {
-            try {
-              await fs.unlink(filePath);
-            } catch (cleanupError) {
-              console.warn(`Cleanup warning: ${cleanupError.message}`);
-            }
-          }
-        }, 1000);
+      // Return JSON with both original and cleaned text
+      res.json({
+        original: result.original,
+        cleaned: result.cleaned,
+        metadata: {
+          documentType: result.metadata.documentType,
+          changesCount: result.metadata.changesCount,
+          confidence: result.metadata.confidence,
+          originalLength: result.metadata.originalLength,
+          cleanedLength: result.metadata.cleanedLength,
+          reduction: result.metadata.reduction,
+          changes: result.metadata.changes || []
+        },
+        pages: result.pages,
+        processingTime: result.processingTime,
+        ocrTime: result.ocrTime,
+        cleaningTime: result.cleaningTime,
+        filename: originalname
       });
+
+      // Cleanup temp files after response sent
+      setTimeout(async () => {
+        for (const filePath of tempFilesToCleanup) {
+          try {
+            await fs.unlink(filePath);
+          } catch (cleanupError) {
+            console.warn(`Cleanup warning: ${cleanupError.message}`);
+          }
+        }
+      }, 1000);
     }
 
   } catch (error) {
