@@ -104,9 +104,9 @@ export async function processPDF(pdfPath, tempDir) {
         if (text.length === 0) {
           return `[Page ${index + 1}: No text detected]`;
         }
-        return `--- Page ${index + 1} ---\\n${text}`;
+        return `--- Page ${index + 1} ---\n${text}`;
       })
-      .join('\\n\\n');
+      .join('\n\n');
 
     const ocrTime = Date.now() - startTime;
 
@@ -199,9 +199,9 @@ export async function generateTextFile(text, originalFilename, tempDir) {
   const textFilename = `${baseFilename}_ocr_${timestamp}.txt`;
   const textFilePath = path.join(tempDir, textFilename);
 
-  const header = `OCR Extraction Results\\n`;
-  const separator = `${'='.repeat(50)}\\n`;
-  const metadata = `Original File: ${originalFilename}\\nExtracted: ${new Date().toLocaleString()}\\nLanguage: Vietnamese + English\\n\\n`;
+  const header = `OCR Extraction Results\n`;
+  const separator = `${'='.repeat(50)}\n`;
+  const metadata = `Original File: ${originalFilename}\nExtracted: ${new Date().toLocaleString()}\nLanguage: Vietnamese + English\n\n`;
 
   const content = header + separator + metadata + separator + text;
 

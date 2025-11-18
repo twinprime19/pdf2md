@@ -128,6 +128,7 @@ app.post('/api/ocr', upload.single('pdf'), async (req, res) => {
         metadata: {
           documentType: result.metadata.documentType,
           changesCount: result.metadata.changesCount,
+          totalCorrections: result.metadata.totalCorrections || 0,  // NEW: Accurate count
           confidence: result.metadata.confidence,
           originalLength: result.metadata.originalLength,
           cleanedLength: result.metadata.cleanedLength,

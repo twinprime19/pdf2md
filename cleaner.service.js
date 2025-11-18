@@ -507,6 +507,12 @@ export class VietnameseOCRCleaner {
       changes.length,
       docType
     );
+
+    // Calculate accurate total corrections
+    metadata.totalCorrections = changes.reduce((sum, change) => {
+      return sum + (change.count || 0);
+    }, 0);
+
     metadata.changes = changes;
     metadata.confidence = this._calculateConfidence(text, cleaned, changes, docType);
 
@@ -577,18 +583,41 @@ export class VietnameseOCRCleaner {
     return { text: result, changes };
   }
 
+  /**
+   * Normalize whitespace while preserving document structure
+   *
+   * Rules:
+   * - Converts tabs to 2 spaces
+   * - Limits consecutive spaces to 2 (preserves indentation)
+   * - Limits consecutive newlines to 4 (preserves paragraph spacing)
+   * - Removes trailing spaces from lines
+   * - Preserves leading spaces for indentation
+   *
+   * @param {string} text - Text to normalize
+   * @returns {{text: string, changes: Array}} Normalized text and changes
+   */
   _normalizeWhitespace(text) {
     const changes = [];
     const before = text;
 
     let result = text
-      .replace(/\t/g, ' ')
+      // Step 1: Normalize line endings (keep)
       .replace(/\r\n/g, '\n')
       .replace(/\r/g, '\n')
-      .replace(/[ \t]+/g, ' ')
-      .replace(/\n{4,}/g, '\n\n\n')
-      .replace(/^ +/gm, '')
+
+      // Step 2: Convert tabs to 2 spaces (keep)
+      .replace(/\t/g, '  ')
+
+      // Step 3: Limit excessive spaces (CHANGED: 3+ → 2 spaces)
+      .replace(/[ ]{3,}/g, '  ')
+
+      // Step 4: Limit excessive newlines (CHANGED: 5+ → 4 newlines)
+      .replace(/\n{5,}/g, '\n\n\n\n')
+
+      // Step 5: Remove trailing spaces only (keep)
       .replace(/ +$/gm, '');
+
+      // NOTE: Removed .replace(/^ +/gm, '') to preserve indentation
 
     if (before !== result) {
       changes.push({ type: 'whitespace_normalization' });
@@ -601,17 +630,38 @@ export class VietnameseOCRCleaner {
     let result = text;
     const changes = [];
     let fixCount = 0;
+    const detailedChanges = [];  // NEW: Track details
+    const MAX_DETAILS = 100;      // Limit for performance
 
     this.vietnameseCharFixes.forEach(({ pattern, replacement }) => {
       const matches = result.match(pattern);
       if (matches) {
+        // Track details for each match
+        matches.forEach(match => {
+          if (detailedChanges.length < MAX_DETAILS) {
+            detailedChanges.push({
+              type: 'vietnamese_char',
+              before: match,
+              after: typeof replacement === 'function'
+                ? replacement(match)
+                : match.replace(pattern, replacement),
+              context: this._getContext(result, match, 20)
+            });
+          }
+          fixCount++;
+        });
+
         result = result.replace(pattern, replacement);
-        fixCount += matches.length;
       }
     });
 
     if (fixCount > 0) {
-      changes.push({ type: 'vietnamese_char_fix', count: fixCount });
+      changes.push({
+        type: 'vietnamese_char_fix',
+        count: fixCount,
+        details: detailedChanges,
+        remaining: Math.max(0, fixCount - MAX_DETAILS)
+      });
     }
 
     return { text: result, changes };
@@ -621,17 +671,35 @@ export class VietnameseOCRCleaner {
     let result = text;
     const changes = [];
     let fixCount = 0;
+    const detailedChanges = [];
+    const MAX_DETAILS = 100;
 
     this.coreVocabulary.forEach(({ pattern, replacement }) => {
       const matches = result.match(pattern);
       if (matches) {
+        matches.forEach(match => {
+          if (detailedChanges.length < MAX_DETAILS) {
+            detailedChanges.push({
+              type: 'core_vocabulary',
+              before: match,
+              after: replacement,
+              context: this._getContext(result, match, 20)
+            });
+          }
+          fixCount++;
+        });
+
         result = result.replace(pattern, replacement);
-        fixCount += matches.length;
       }
     });
 
     if (fixCount > 0) {
-      changes.push({ type: 'core_vocabulary_fix', count: fixCount });
+      changes.push({
+        type: 'core_vocabulary_fix',
+        count: fixCount,
+        details: detailedChanges,
+        remaining: Math.max(0, fixCount - MAX_DETAILS)
+      });
     }
 
     return { text: result, changes };
@@ -641,26 +709,46 @@ export class VietnameseOCRCleaner {
     let result = text;
     const changes = [];
     let totalFixes = 0;
+    const allDetailedChanges = [];
+    const MAX_DETAILS = 100;
 
     for (const [category, patterns] of Object.entries(this.legalVocabulary)) {
       let categoryFixes = 0;
-      
+      const categoryDetails = [];
+
       patterns.forEach(({ pattern, replacement }) => {
         const matches = result.match(pattern);
         if (matches) {
+          matches.forEach(match => {
+            if (allDetailedChanges.length < MAX_DETAILS) {
+              categoryDetails.push({
+                type: 'legal_vocabulary',
+                category: category,
+                before: match,
+                after: replacement,
+                context: this._getContext(result, match, 20)
+              });
+            }
+            categoryFixes++;
+          });
+
           result = result.replace(pattern, replacement);
-          categoryFixes += matches.length;
         }
       });
 
       if (categoryFixes > 0) {
-        changes.push({ 
-          type: 'legal_vocabulary',
-          category,
-          count: categoryFixes
-        });
+        allDetailedChanges.push(...categoryDetails);
         totalFixes += categoryFixes;
       }
+    }
+
+    if (totalFixes > 0) {
+      changes.push({
+        type: 'legal_vocabulary',
+        count: totalFixes,
+        details: allDetailedChanges,
+        remaining: Math.max(0, totalFixes - MAX_DETAILS)
+      });
     }
 
     return { text: result, changes };
@@ -725,12 +813,16 @@ export class VietnameseOCRCleaner {
     return { text: result, changes };
   }
 
+  /**
+   * Final cleanup - only trim document edges
+   * Internal whitespace processing is handled by _normalizeWhitespace()
+   *
+   * @param {string} text - Text to cleanup
+   * @returns {string} Cleaned text
+   */
   _finalCleanup(text) {
-    return text
-      .replace(/\s{2,}/g, ' ')
-      .replace(/\n{4,}/g, '\n\n\n')
-      .replace(/^\s+|\s+$/gm, '')
-      .trim();
+    // Only trim document edges, no internal processing
+    return text.trim();
   }
 
   _calculateConfidence(original, cleaned, changes, docType) {
@@ -860,6 +952,29 @@ export class VietnameseOCRCleaner {
   _extract(text, pattern) {
     const match = text.match(pattern);
     return match ? match[1].trim() : null;
+  }
+
+  /**
+   * Extract surrounding context for a match
+   * @param {string} text - Full text
+   * @param {string} match - Matched substring
+   * @param {number} contextLength - Characters before/after (default 20)
+   * @returns {string} Context snippet
+   */
+  _getContext(text, match, contextLength = 20) {
+    const index = text.indexOf(match);
+    if (index === -1) return match;
+
+    const start = Math.max(0, index - contextLength);
+    const end = Math.min(text.length, index + match.length + contextLength);
+
+    let context = text.substring(start, end);
+
+    // Add ellipsis if truncated
+    if (start > 0) context = '...' + context;
+    if (end < text.length) context = context + '...';
+
+    return context;
   }
 
   /**

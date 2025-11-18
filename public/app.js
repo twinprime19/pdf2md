@@ -260,10 +260,13 @@ function showSuccess(data) {
 
         // Update metadata display
         document.getElementById('docType').textContent = formatDocumentType(data.metadata.documentType);
-        document.getElementById('corrections').textContent = data.metadata.changesCount || 0;
+        document.getElementById('corrections').textContent = data.metadata.totalCorrections || data.metadata.changesCount || 0;
         document.getElementById('confidence').textContent = Math.round((data.metadata.confidence || 0) * 100);
         document.getElementById('ocrTime').textContent = data.ocrTime || 0;
         document.getElementById('cleanTime').textContent = data.cleaningTime || 0;
+
+        // Display corrections log
+        displayCorrectionsLog(data.metadata);
     }
 }
 
@@ -294,6 +297,9 @@ function resetUI() {
     // Reset UI elements
     resetFileInfo();
     hideAllSections();
+
+    // Hide corrections log
+    document.getElementById('correctionsSection').style.display = 'none';
 
     // Clear any progress intervals
     const intervalId = progressSection.dataset.intervalId;
@@ -649,4 +655,105 @@ function formatDocumentType(type) {
     return type.split('_')
         .map(word => word.charAt(0).toUpperCase() + word.slice(1))
         .join(' ');
+}
+
+/**
+ * Toggle corrections log visibility
+ */
+function toggleCorrectionsLog() {
+    const content = document.getElementById('correctionsContent');
+    const toggleBtn = document.getElementById('correctionsToggle');
+
+    content.classList.toggle('collapsed');
+    toggleBtn.classList.toggle('collapsed');
+}
+
+/**
+ * Display corrections log from metadata
+ * @param {Object} metadata - Cleaning metadata with changes
+ */
+function displayCorrectionsLog(metadata) {
+    const section = document.getElementById('correctionsSection');
+    const totalCount = document.getElementById('totalCorrectionsCount');
+    const correctionsList = document.getElementById('correctionsList');
+
+    // Calculate total corrections
+    const total = metadata.totalCorrections || metadata.changesCount || 0;
+    totalCount.textContent = `(${total} total)`;
+
+    // Clear previous content
+    correctionsList.innerHTML = '';
+
+    // Group and display corrections by category
+    const categories = {
+        'vietnamese_char_fix': '⚙️ Vietnamese Character Fixes',
+        'core_vocabulary_fix': '📚 Core Vocabulary Fixes',
+        'legal_vocabulary': '⚖️ Legal Vocabulary Fixes',
+        'mechanical_artifact_removal': '🔧 Artifact Removal',
+        'whitespace_normalization': '📏 Whitespace Normalization',
+        'number_formatting': '🔢 Number Formatting'
+    };
+
+    metadata.changes.forEach(change => {
+        if (!change.details || change.details.length === 0) return;
+
+        // Create category section
+        const categoryDiv = document.createElement('div');
+        categoryDiv.className = 'correction-category';
+
+        // Category title
+        const titleDiv = document.createElement('div');
+        titleDiv.className = 'category-title';
+        const categoryName = categories[change.type] || change.type;
+        titleDiv.textContent = `${categoryName} (${change.count})`;
+        categoryDiv.appendChild(titleDiv);
+
+        // Add correction items
+        change.details.forEach(detail => {
+            const itemDiv = document.createElement('div');
+            itemDiv.className = 'correction-item';
+
+            itemDiv.innerHTML = `
+                <span class="correction-before">${escapeHtml(detail.before)}</span>
+                <span class="correction-arrow">→</span>
+                <span class="correction-after">${escapeHtml(detail.after)}</span>
+                ${detail.context ? `<span class="correction-context">${escapeHtml(detail.context)}</span>` : ''}
+            `;
+
+            categoryDiv.appendChild(itemDiv);
+        });
+
+        // Show "and X more" if capped
+        if (change.remaining > 0) {
+            const moreDiv = document.createElement('div');
+            moreDiv.className = 'correction-item';
+            moreDiv.style.opacity = '0.6';
+            moreDiv.innerHTML = `
+                <span>... and ${change.remaining} more ${categoryName.toLowerCase()}</span>
+            `;
+            categoryDiv.appendChild(moreDiv);
+        }
+
+        correctionsList.appendChild(categoryDiv);
+    });
+
+    // Show section
+    section.style.display = 'block';
+
+    // Start collapsed on mobile
+    if (window.innerWidth <= 768) {
+        document.getElementById('correctionsContent').classList.add('collapsed');
+        document.getElementById('correctionsToggle').classList.add('collapsed');
+    }
+}
+
+/**
+ * Escape HTML to prevent XSS
+ * @param {string} text - Text to escape
+ * @returns {string} Escaped text
+ */
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }

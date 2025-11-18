@@ -92,6 +92,23 @@
                         <span>OCR: <span id="ocrTime">0</span>ms | Clean: <span id="cleanTime">0</span>ms</span>
                     </div>
                 </div>
+
+                <!-- Corrections Log Section -->
+                <div class="corrections-section" id="correctionsSection" style="display: none;">
+                    <div class="corrections-header" onclick="toggleCorrectionsLog()">
+                        <h4>
+                            📝 Corrections Made
+                            <span id="totalCorrectionsCount">(0)</span>
+                        </h4>
+                        <button class="toggle-btn" id="correctionsToggle">▼</button>
+                    </div>
+
+                    <div class="corrections-content" id="correctionsContent">
+                        <div id="correctionsList">
+                            <!-- Dynamically populated -->
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <div class="error-section" id="errorSection" style="display: none;">
