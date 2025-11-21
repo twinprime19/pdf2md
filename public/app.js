@@ -43,8 +43,11 @@ function setupEventListeners() {
     newFileBtn.addEventListener('click', resetUI);
     retryBtn.addEventListener('click', resetUI);
 
-    // Copy button
-    document.getElementById('copyBtn').addEventListener('click', copyText);
+    // Copy and download buttons
+    document.getElementById('copyOriginal').addEventListener('click', () => copyText('originalText'));
+    document.getElementById('copyCleaned').addEventListener('click', () => copyText('cleanedText'));
+    document.getElementById('downloadOriginal').addEventListener('click', downloadOriginal);
+    document.getElementById('downloadDiff').addEventListener('click', downloadDiff);
 
     // Prevent default drag behaviors
     ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
@@ -130,12 +133,17 @@ function formatFileSize(bytes) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-function copyText() {
-    const textarea = document.getElementById('ocrText');
+function copyText(textareaId) {
+    const textarea = document.getElementById(textareaId);
     textarea.select();
     document.execCommand('copy');
-    document.getElementById('copyBtn').textContent = 'Copied!';
-    setTimeout(() => document.getElementById('copyBtn').textContent = 'Copy Text', 2000);
+
+    // Update button text temporarily
+    const buttonId = textareaId === 'originalText' ? 'copyOriginal' : 'copyCleaned';
+    const button = document.getElementById(buttonId);
+    const originalText = button.textContent;
+    button.textContent = 'Copied!';
+    setTimeout(() => button.textContent = originalText, 2000);
 }
 
 async function handleFormSubmit(e) {
@@ -166,40 +174,37 @@ async function handleFormSubmit(e) {
             throw new Error(errorData.error || 'Processing failed');
         }
 
-        // The response should trigger a file download
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.style.display = 'none';
-        a.href = url;
+        // Get JSON response with original and cleaned text
+        const contentType = response.headers.get('content-type');
 
-        // Get filename from response headers or generate one
-        const contentDisposition = response.headers.get('content-disposition');
-        let filename = 'ocr_result.txt';
-        if (contentDisposition) {
-            const filenameMatch = contentDisposition.match(/filename[^;=\\n]*=((['\\\"]).?|[^;\\n]*)/);
-            if (filenameMatch && filenameMatch[1]) {
-                filename = filenameMatch[1].replace(/['\\\"]/g, '');
+        if (contentType && contentType.includes('application/json')) {
+            const data = await response.json();
+
+            // Check if this is streaming mode response
+            if (data.sessionId && data.streaming) {
+                hideProgress();
+                showStreamingMessage(data, startTime);
+                return;
             }
+
+            // Legacy mode - handle dual-text response
+            hideProgress();
+            showSuccess(data);
+
+            // Setup synchronized scrolling after textareas are populated
+            setupSynchronizedScrolling();
+        } else {
+            // Fallback for old blob response format (should not happen with current code)
+            const blob = await response.blob();
+            const textContent = await blob.text();
+            hideProgress();
+            showSuccess({
+                original: textContent,
+                cleaned: textContent,
+                metadata: { documentType: 'unknown', changesCount: 0, confidence: 0 },
+                filename: selectedFile.name
+            });
         }
-        a.download = filename;
-
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        window.URL.revokeObjectURL(url);
-
-        const processingTimeMs = Date.now() - startTime;
-
-        // Read blob content for textarea display
-        const textContent = blob.type === 'text/plain' ? await blob.text() : null;
-
-        hideProgress();
-        showSuccess({
-            processingTime: processingTimeMs,
-            filename: filename,
-            textContent: textContent
-        });
 
     } catch (error) {
         console.error('OCR processing error:', error);
@@ -244,13 +249,24 @@ function hideProgress() {
 
 function showSuccess(data) {
     processingTime.textContent = `Processing time: ${(data.processingTime / 1000).toFixed(1)}s`;
-    pageCount.textContent = `File: ${data.filename}`;
+    pageCount.textContent = `File: ${data.filename} (${data.pages} pages)`;
     resultSection.style.display = 'block';
 
-    // Display OCR text in textarea if available
-    if (data.textContent) {
-        document.getElementById('ocrText').value = data.textContent;
+    // Display both original and cleaned text in textareas
+    if (data.original && data.cleaned) {
+        document.getElementById('originalText').value = data.original;
+        document.getElementById('cleanedText').value = data.cleaned;
         document.getElementById('textPreview').style.display = 'block';
+
+        // Update metadata display
+        document.getElementById('docType').textContent = formatDocumentType(data.metadata.documentType);
+        document.getElementById('corrections').textContent = data.metadata.totalCorrections || data.metadata.changesCount || 0;
+        document.getElementById('confidence').textContent = Math.round((data.metadata.confidence || 0) * 100);
+        document.getElementById('ocrTime').textContent = data.ocrTime || 0;
+        document.getElementById('cleanTime').textContent = data.cleaningTime || 0;
+
+        // Display corrections log
+        displayCorrectionsLog(data.metadata);
     }
 }
 
@@ -264,6 +280,12 @@ function hideAllSections() {
     resultSection.style.display = 'none';
     errorSection.style.display = 'none';
     document.getElementById('textPreview').style.display = 'none';
+
+    // Hide streaming section if it exists
+    const streamingSection = document.getElementById('streamingSection');
+    if (streamingSection) {
+        streamingSection.style.display = 'none';
+    }
 }
 
 function resetUI() {
@@ -276,10 +298,20 @@ function resetUI() {
     resetFileInfo();
     hideAllSections();
 
+    // Hide corrections log
+    document.getElementById('correctionsSection').style.display = 'none';
+
     // Clear any progress intervals
     const intervalId = progressSection.dataset.intervalId;
     if (intervalId) {
         clearInterval(parseInt(intervalId));
+    }
+
+    // Clear streaming status intervals
+    const statusIntervalId = document.body.dataset.statusIntervalId;
+    if (statusIntervalId) {
+        clearInterval(parseInt(statusIntervalId));
+        delete document.body.dataset.statusIntervalId;
     }
 
     // Reset progress bar
@@ -287,4 +319,441 @@ function resetUI() {
     progressText.textContent = 'Processing PDF...';
 
     console.log('UI reset completed');
+}
+
+// Streaming mode functions
+function showStreamingMessage(sessionData, startTime) {
+    const streamingSection = getOrCreateStreamingSection();
+
+    streamingSection.innerHTML = `
+        <div class="streaming-info">
+            <h3>🔄 Processing Large File</h3>
+            <p><strong>Session:</strong> ${sessionData.sessionId.substring(0, 8)}...</p>
+            <p><strong>File:</strong> ${sessionData.filename}</p>
+            <p><strong>Size:</strong> ${formatFileSize(sessionData.fileSize)}</p>
+
+            <div class="streaming-progress">
+                <div class="progress-bar">
+                    <div id="streamingProgressFill" class="progress-fill"></div>
+                </div>
+                <div id="streamingProgressText" class="progress-text">Initializing...</div>
+            </div>
+
+            <div class="streaming-status">
+                <div id="streamingStatus">Starting processing...</div>
+                <div id="streamingEta"></div>
+            </div>
+
+            <div class="streaming-actions">
+                <button id="downloadStreamingBtn" disabled>Download Result</button>
+                <button id="cancelStreamingBtn">Cancel</button>
+            </div>
+        </div>
+    `;
+
+    streamingSection.style.display = 'block';
+
+    // Setup event listeners
+    document.getElementById('downloadStreamingBtn').addEventListener('click', () => {
+        downloadStreamingResult(sessionData.sessionId);
+    });
+
+    document.getElementById('cancelStreamingBtn').addEventListener('click', () => {
+        cancelStreamingSession(sessionData.sessionId);
+    });
+
+    // Start polling for status
+    pollSessionStatus(sessionData.sessionId, startTime);
+}
+
+function getOrCreateStreamingSection() {
+    let section = document.getElementById('streamingSection');
+    if (!section) {
+        section = document.createElement('div');
+        section.id = 'streamingSection';
+        section.className = 'section streaming-section';
+        section.style.display = 'none';
+
+        // Insert after progress section
+        progressSection.parentNode.insertBefore(section, progressSection.nextSibling);
+    }
+    return section;
+}
+
+function pollSessionStatus(sessionId, startTime) {
+    const pollInterval = 2000; // Poll every 2 seconds
+
+    const poll = async () => {
+        try {
+            const response = await fetch(`/api/session/${sessionId}/status`);
+
+            if (!response.ok) {
+                throw new Error('Failed to get session status');
+            }
+
+            const status = await response.json();
+            updateStreamingUI(status, startTime);
+
+            if (status.complete) {
+                // Processing completed
+                clearInterval(intervalId);
+                delete document.body.dataset.statusIntervalId;
+
+                if (status.hasOutput) {
+                    enableDownload(sessionId);
+                    showStreamingSuccess(status, startTime);
+                } else {
+                    showError('Processing completed but no output file found');
+                }
+            } else if (status.status === 'not_found') {
+                // Session not found or error
+                clearInterval(intervalId);
+                delete document.body.dataset.statusIntervalId;
+                showError('Session not found or processing failed');
+            }
+
+        } catch (error) {
+            console.error('Status polling error:', error);
+            // Continue polling - don't stop on temporary errors
+        }
+    };
+
+    const intervalId = setInterval(poll, pollInterval);
+    document.body.dataset.statusIntervalId = intervalId;
+
+    // Initial poll
+    poll();
+}
+
+function updateStreamingUI(status, startTime) {
+    const progressFill = document.getElementById('streamingProgressFill');
+    const progressText = document.getElementById('streamingProgressText');
+    const statusDiv = document.getElementById('streamingStatus');
+    const etaDiv = document.getElementById('streamingEta');
+
+    if (progressFill) {
+        progressFill.style.width = `${status.percentage || 0}%`;
+    }
+
+    if (progressText) {
+        progressText.textContent = `Page ${status.lastPage || 0} of ${status.totalPages || 'Unknown'} (${status.percentage || 0}%)`;
+    }
+
+    if (statusDiv) {
+        if (status.complete) {
+            statusDiv.textContent = '✅ Processing completed!';
+        } else {
+            statusDiv.textContent = `Processing page ${status.lastPage || 0}/${status.totalPages || '?'}...`;
+        }
+    }
+
+    if (etaDiv && status.estimatedTimeRemaining) {
+        const eta = Math.round(status.estimatedTimeRemaining / 1000);
+        etaDiv.textContent = `Estimated time remaining: ${eta}s`;
+    } else if (etaDiv) {
+        const elapsed = Math.round((Date.now() - startTime) / 1000);
+        etaDiv.textContent = `Elapsed time: ${elapsed}s`;
+    }
+}
+
+function enableDownload(sessionId) {
+    const downloadBtn = document.getElementById('downloadStreamingBtn');
+    if (downloadBtn) {
+        downloadBtn.disabled = false;
+        downloadBtn.textContent = 'Download Result';
+    }
+}
+
+function downloadStreamingResult(sessionId) {
+    const url = `/api/session/${sessionId}/download`;
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = '';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+}
+
+function cancelStreamingSession(sessionId) {
+    if (confirm('Are you sure you want to cancel processing?')) {
+        fetch(`/api/session/${sessionId}`, { method: 'DELETE' })
+            .then(() => {
+                resetUI();
+            })
+            .catch(error => {
+                console.error('Cancel error:', error);
+                showError('Failed to cancel session');
+            });
+    }
+}
+
+function showStreamingSuccess(status, startTime) {
+    const streamingSection = document.getElementById('streamingSection');
+    if (streamingSection) {
+        streamingSection.innerHTML = `
+            <div class="streaming-success">
+                <h3>✅ Processing Complete</h3>
+                <p><strong>Pages processed:</strong> ${status.totalPages}</p>
+                <p><strong>Total time:</strong> ${Math.round((Date.now() - startTime) / 1000)}s</p>
+                <div class="success-actions">
+                    <button onclick="downloadStreamingResult('${status.sessionId}')">Download Result</button>
+                    <button onclick="resetUI()">Process Another File</button>
+                </div>
+            </div>
+        `;
+    }
+}
+
+// ============================================
+// DUAL-TEXT COMPARISON FEATURES
+// ============================================
+
+/**
+ * Setup synchronized scrolling between original and cleaned textareas
+ */
+function setupSynchronizedScrolling() {
+    const originalTA = document.getElementById('originalText');
+    const cleanedTA = document.getElementById('cleanedText');
+
+    if (!originalTA || !cleanedTA) return;
+
+    let isSyncing = false;
+
+    // Sync from original to cleaned
+    originalTA.addEventListener('scroll', () => {
+        if (!isSyncing) {
+            isSyncing = true;
+            cleanedTA.scrollTop = originalTA.scrollTop;
+            cleanedTA.scrollLeft = originalTA.scrollLeft;
+            setTimeout(() => isSyncing = false, 50);
+        }
+    });
+
+    // Sync from cleaned to original
+    cleanedTA.addEventListener('scroll', () => {
+        if (!isSyncing) {
+            isSyncing = true;
+            originalTA.scrollTop = cleanedTA.scrollTop;
+            originalTA.scrollLeft = cleanedTA.scrollLeft;
+            setTimeout(() => isSyncing = false, 50);
+        }
+    });
+
+    console.log('Synchronized scrolling enabled');
+}
+
+/**
+ * Download original OCR text as .txt file
+ */
+function downloadOriginal() {
+    const text = document.getElementById('originalText').value;
+    const filename = selectedFile ? selectedFile.name.replace('.pdf', '_original.txt') : 'original_ocr.txt';
+
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    downloadBlob(blob, filename);
+}
+
+/**
+ * Generate and download diff report comparing original and cleaned text
+ */
+function downloadDiff() {
+    const original = document.getElementById('originalText').value;
+    const cleaned = document.getElementById('cleanedText').value;
+
+    // Get metadata
+    const docType = document.getElementById('docType').textContent;
+    const corrections = document.getElementById('corrections').textContent;
+    const confidence = document.getElementById('confidence').textContent;
+    const ocrTime = document.getElementById('ocrTime').textContent;
+    const cleanTime = document.getElementById('cleanTime').textContent;
+
+    // Generate diff report
+    const report = generateDiffReport(original, cleaned, {
+        docType,
+        corrections,
+        confidence,
+        ocrTime,
+        cleanTime
+    });
+
+    const filename = selectedFile ? selectedFile.name.replace('.pdf', '_diff_report.txt') : 'ocr_diff_report.txt';
+    const blob = new Blob([report], { type: 'text/plain;charset=utf-8' });
+    downloadBlob(blob, filename);
+}
+
+/**
+ * Generate a text-based diff report
+ */
+function generateDiffReport(original, cleaned, metadata) {
+    const header = `
+========================================
+OCR CLEANING DIFF REPORT
+========================================
+
+Generated: ${new Date().toLocaleString()}
+Document Type: ${metadata.docType}
+Corrections Made: ${metadata.corrections}
+Confidence Score: ${metadata.confidence}%
+OCR Processing Time: ${metadata.ocrTime}ms
+Cleaning Time: ${metadata.cleanTime}ms
+
+========================================
+STATISTICS
+========================================
+
+Original Length: ${original.length} characters
+Cleaned Length: ${cleaned.length} characters
+Difference: ${cleaned.length - original.length} characters
+
+========================================
+ORIGINAL TEXT
+========================================
+
+${original}
+
+========================================
+CLEANED TEXT
+========================================
+
+${cleaned}
+
+========================================
+END OF REPORT
+========================================
+`;
+
+    return header;
+}
+
+/**
+ * Helper function to download blob as file
+ */
+function downloadBlob(blob, filename) {
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.style.display = 'none';
+    a.href = url;
+    a.download = filename;
+
+    document.body.appendChild(a);
+    a.click();
+
+    // Cleanup
+    setTimeout(() => {
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+    }, 100);
+}
+
+/**
+ * Format document type for display
+ */
+function formatDocumentType(type) {
+    if (!type || type === 'unknown') return 'Unknown';
+
+    // Convert snake_case to Title Case
+    return type.split('_')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ');
+}
+
+/**
+ * Toggle corrections log visibility
+ */
+function toggleCorrectionsLog() {
+    const content = document.getElementById('correctionsContent');
+    const toggleBtn = document.getElementById('correctionsToggle');
+
+    content.classList.toggle('collapsed');
+    toggleBtn.classList.toggle('collapsed');
+}
+
+/**
+ * Display corrections log from metadata
+ * @param {Object} metadata - Cleaning metadata with changes
+ */
+function displayCorrectionsLog(metadata) {
+    const section = document.getElementById('correctionsSection');
+    const totalCount = document.getElementById('totalCorrectionsCount');
+    const correctionsList = document.getElementById('correctionsList');
+
+    // Calculate total corrections
+    const total = metadata.totalCorrections || metadata.changesCount || 0;
+    totalCount.textContent = `(${total} total)`;
+
+    // Clear previous content
+    correctionsList.innerHTML = '';
+
+    // Group and display corrections by category
+    const categories = {
+        'vietnamese_char_fix': '⚙️ Vietnamese Character Fixes',
+        'core_vocabulary_fix': '📚 Core Vocabulary Fixes',
+        'legal_vocabulary': '⚖️ Legal Vocabulary Fixes',
+        'mechanical_artifact_removal': '🔧 Artifact Removal',
+        'whitespace_normalization': '📏 Whitespace Normalization',
+        'number_formatting': '🔢 Number Formatting'
+    };
+
+    metadata.changes.forEach(change => {
+        if (!change.details || change.details.length === 0) return;
+
+        // Create category section
+        const categoryDiv = document.createElement('div');
+        categoryDiv.className = 'correction-category';
+
+        // Category title
+        const titleDiv = document.createElement('div');
+        titleDiv.className = 'category-title';
+        const categoryName = categories[change.type] || change.type;
+        titleDiv.textContent = `${categoryName} (${change.count})`;
+        categoryDiv.appendChild(titleDiv);
+
+        // Add correction items
+        change.details.forEach(detail => {
+            const itemDiv = document.createElement('div');
+            itemDiv.className = 'correction-item';
+
+            itemDiv.innerHTML = `
+                <span class="correction-before">${escapeHtml(detail.before)}</span>
+                <span class="correction-arrow">→</span>
+                <span class="correction-after">${escapeHtml(detail.after)}</span>
+                ${detail.context ? `<span class="correction-context">${escapeHtml(detail.context)}</span>` : ''}
+            `;
+
+            categoryDiv.appendChild(itemDiv);
+        });
+
+        // Show "and X more" if capped
+        if (change.remaining > 0) {
+            const moreDiv = document.createElement('div');
+            moreDiv.className = 'correction-item';
+            moreDiv.style.opacity = '0.6';
+            moreDiv.innerHTML = `
+                <span>... and ${change.remaining} more ${categoryName.toLowerCase()}</span>
+            `;
+            categoryDiv.appendChild(moreDiv);
+        }
+
+        correctionsList.appendChild(categoryDiv);
+    });
+
+    // Show section
+    section.style.display = 'block';
+
+    // Start collapsed on mobile
+    if (window.innerWidth <= 768) {
+        document.getElementById('correctionsContent').classList.add('collapsed');
+        document.getElementById('correctionsToggle').classList.add('collapsed');
+    }
+}
+
+/**
+ * Escape HTML to prevent XSS
+ * @param {string} text - Text to escape
+ * @returns {string} Escaped text
+ */
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }

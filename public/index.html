@@ -55,8 +55,60 @@
             </div>
 
             <div id="textPreview" style="display: none;">
-                <textarea id="ocrText" readonly rows="10"></textarea>
-                <button id="copyBtn">Copy Text</button>
+                <div class="dual-text-container">
+                    <div class="text-pane">
+                        <h4>📄 Original OCR</h4>
+                        <textarea id="originalText" readonly rows="20"></textarea>
+                        <div class="button-group">
+                            <button id="copyOriginal" class="action-btn">Copy</button>
+                            <button id="downloadOriginal" class="action-btn">Download</button>
+                        </div>
+                    </div>
+                    <div class="text-pane">
+                        <h4>✨ Cleaned Text</h4>
+                        <textarea id="cleanedText" readonly rows="20"></textarea>
+                        <div class="button-group">
+                            <button id="copyCleaned" class="action-btn">Copy</button>
+                            <button id="downloadDiff" class="action-btn">Download Diff</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="metadata-section">
+                    <div class="metadata-item">
+                        <strong>📋 Document Type:</strong>
+                        <span id="docType">Unknown</span>
+                    </div>
+                    <div class="metadata-item">
+                        <strong>✏️ Corrections:</strong>
+                        <span id="corrections">0</span>
+                    </div>
+                    <div class="metadata-item">
+                        <strong>📊 Confidence:</strong>
+                        <span id="confidence">0</span>%
+                    </div>
+                    <div class="metadata-item">
+                        <strong>⏱️ Processing:</strong>
+                        <span>OCR: <span id="ocrTime">0</span>ms | Clean: <span id="cleanTime">0</span>ms</span>
+                    </div>
+                </div>
+
+                <!-- Corrections Log Section -->
+                <div class="corrections-section" id="correctionsSection" style="display: none;">
+                    <div class="corrections-header" onclick="toggleCorrectionsLog()">
+                        <h4>
+                            📝 Corrections Made
+                            <span id="totalCorrectionsCount">(0)</span>
+                        </h4>
+                        <button class="toggle-btn" id="correctionsToggle">▼</button>
+                    </div>
+
+                    <div class="corrections-content" id="correctionsContent">
+                        <div id="correctionsList">
+                            <!-- Dynamically populated -->
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <div class="error-section" id="errorSection" style="display: none;">

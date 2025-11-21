@@ -3,6 +3,7 @@ import { promisify } from 'util';
 import tesseract from 'node-tesseract-ocr';
 import fs from 'fs/promises';
 import path from 'path';
+import { VietnameseOCRCleaner } from './cleaner.service.js';
 
 const execAsync = promisify(exec);
 
@@ -66,10 +67,10 @@ export async function extractTextFromImage(imagePath) {
 }
 
 /**
- * Process entire PDF: convert to images and extract all text
+ * Process entire PDF: convert to images, extract text, and clean Vietnamese OCR output
  * @param {string} pdfPath - Path to PDF file
  * @param {string} tempDir - Temporary directory for processing
- * @returns {Promise<{text: string, pages: number, processingTime: number}>}
+ * @returns {Promise<{original: string, cleaned: string, metadata: object, pages: number, processingTime: number, ocrTime: number, cleaningTime: number}>}
  */
 export async function processPDF(pdfPath, tempDir) {
   const startTime = Date.now();
@@ -103,23 +104,66 @@ export async function processPDF(pdfPath, tempDir) {
         if (text.length === 0) {
           return `[Page ${index + 1}: No text detected]`;
         }
-        return `--- Page ${index + 1} ---\\n${text}`;
+        return `--- Page ${index + 1} ---\n${text}`;
       })
-      .join('\\n\\n');
+      .join('\n\n');
 
-    // Step 4: Cleanup images
+    const ocrTime = Date.now() - startTime;
+
+    // Step 4: Clean the OCR text using VietnameseOCRCleaner
+    const cleaningStartTime = Date.now();
+    let cleaned = combinedText;
+    let cleaningMetadata = null;
+
+    try {
+      const cleaner = new VietnameseOCRCleaner({
+        aggressiveCleaning: false,
+        preserveCodes: true,
+        fixStructure: true,
+        detectDocumentType: true
+      });
+
+      const cleaningResult = cleaner.clean(combinedText);
+      cleaned = cleaningResult.cleaned;
+      cleaningMetadata = cleaningResult.metadata;
+
+      console.log(`Text cleaning completed`);
+      console.log(`Document type detected: ${cleaningMetadata.documentType}`);
+      console.log(`Changes made: ${cleaningMetadata.changesCount}`);
+      console.log(`Confidence: ${cleaningMetadata.confidence}`);
+    } catch (cleaningError) {
+      console.warn(`Text cleaning failed, using original text: ${cleaningError.message}`);
+      cleaned = combinedText; // Fallback to original if cleaning fails
+      cleaningMetadata = {
+        error: cleaningError.message,
+        documentType: 'unknown',
+        changesCount: 0,
+        confidence: 0
+      };
+    }
+
+    const cleaningTime = Date.now() - cleaningStartTime;
+
+    // Step 5: Cleanup images
     await cleanupDirectory(imageDir);
 
-    const processingTime = Date.now() - startTime;
+    const totalProcessingTime = Date.now() - startTime;
 
-    console.log(`OCR completed in ${processingTime}ms`);
+    console.log(`Total processing completed in ${totalProcessingTime}ms`);
+    console.log(`  - OCR time: ${ocrTime}ms`);
+    console.log(`  - Cleaning time: ${cleaningTime}ms`);
     console.log(`Processed ${imagePaths.length} pages`);
-    console.log(`Total text length: ${combinedText.length} characters`);
+    console.log(`Original text length: ${combinedText.length} characters`);
+    console.log(`Cleaned text length: ${cleaned.length} characters`);
 
     return {
-      text: combinedText,
+      original: combinedText,
+      cleaned: cleaned,
+      metadata: cleaningMetadata,
       pages: imagePaths.length,
-      processingTime,
+      processingTime: totalProcessingTime,
+      ocrTime: ocrTime,
+      cleaningTime: cleaningTime
     };
 
   } catch (error) {
@@ -155,9 +199,9 @@ export async function generateTextFile(text, originalFilename, tempDir) {
   const textFilename = `${baseFilename}_ocr_${timestamp}.txt`;
   const textFilePath = path.join(tempDir, textFilename);
 
-  const header = `OCR Extraction Results\\n`;
-  const separator = `${'='.repeat(50)}\\n`;
-  const metadata = `Original File: ${originalFilename}\\nExtracted: ${new Date().toLocaleString()}\\nLanguage: Vietnamese + English\\n\\n`;
+  const header = `OCR Extraction Results\n`;
+  const separator = `${'='.repeat(50)}\n`;
+  const metadata = `Original File: ${originalFilename}\nExtracted: ${new Date().toLocaleString()}\nLanguage: Vietnamese + English\n\n`;
 
   const content = header + separator + metadata + separator + text;
 
